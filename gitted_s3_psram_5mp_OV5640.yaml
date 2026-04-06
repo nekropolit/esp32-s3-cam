@@ -1,0 +1,123 @@
+esphome:
+  name: s3-door
+  friendly_name: s3_door
+
+esp32:
+  board: esp32-s3-devkitc-1
+  framework:
+    type: esp-idf
+
+psram:
+  mode: octal
+  speed: 80MHz
+
+logger:
+  level: DEBUG
+  hardware_uart: USB_SERIAL_JTAG
+
+api:
+  reboot_timeout: 0s
+
+ota:
+  - platform: esphome
+    password: "esphome"
+
+wifi:
+  ssid: "AP SSID"
+  password: "WIFI-PW"
+  power_save_mode: none
+  fast_connect: true
+  reboot_timeout: 0s
+  output_power: 20dB
+
+  #ap:
+  #  ssid: "S3-Door-Fallback"
+  #  password: "12345678"
+
+captive_portal:
+
+mqtt:
+  broker: 192.168.178.41
+  topic_prefix: s3-door
+  username: "s3cam"
+  password: "s3cam"
+
+  birth_message:
+    topic: s3-door/status
+    payload: online
+
+  will_message:
+    topic: s3-door/status
+    payload: offline
+
+# Kamera Webserver
+esp32_camera_web_server:
+  - port: 8080
+    mode: stream
+  #- port: 8081
+  #  mode: snapshot
+
+# dedizierter I2C Bus (wichtig!)
+i2c:
+  - id: cam_i2c
+    sda: GPIO4
+    scl: GPIO5
+    scan: false
+
+esp32_camera:
+  name: "S3 Door Camera"
+
+  external_clock:
+    pin: GPIO15
+    frequency: 20MHz
+
+  i2c_id: cam_i2c
+
+  data_pins: [GPIO11, GPIO9, GPIO8, GPIO10, GPIO12, GPIO18, GPIO17, GPIO16]
+  vsync_pin: GPIO6
+  href_pin: GPIO7
+  pixel_clock_pin: GPIO13
+  power_down_pin: GPIO14
+
+  # STABILER START
+  resolution: 640x480
+  jpeg_quality: 22
+  max_framerate: 3 fps
+
+  frame_buffer_count: 1
+  frame_buffer_location: PSRAM
+
+globals:
+  - id: snapshot_seq
+    type: uint32_t
+    restore_value: no
+    initial_value: '0'
+
+interval:
+  - interval: 3s
+    then:
+      - lambda: |-
+          id(snapshot_seq)++;
+
+      - mqtt.publish:
+          topic: s3-door/snapshot/available
+          payload: !lambda |-
+            char payload[256];
+            snprintf(
+              payload,
+              sizeof(payload),
+              "{\"seq\":%u,\"url\":\"http://192.168.178.XXX:8081/\",\"ts\":%lu}",
+              id(snapshot_seq),
+              (unsigned long) millis()
+            );
+            return std::string(payload);
+
+sensor:
+  - platform: wifi_signal
+    name: "S3 Door WiFi Signal"
+    update_interval: 60s
+
+text_sensor:
+  - platform: wifi_info
+    ip_address:
+      name: "S3 Door IP"
